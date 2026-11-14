@@ -1,0 +1,17 @@
+{
+  "name": "nova-response",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A calm, human-approved AI email responder powered by Vercel AI Gateway.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "resend": "^6.9.2"
+  }
+}
