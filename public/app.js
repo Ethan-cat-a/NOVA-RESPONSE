@@ -7,9 +7,12 @@ const state = {
   view: 'inbox',
   filter: 'all',
   query: '',
-  status: { mode: 'demo', gatewayReady: false, resendReady: false },
+  status: { mode: 'demo', novaReady: false, outlookReady: false, outlookConnected: false, deviceAuth: null },
   draftEdits: new Map(),
   busy: false,
+  refreshing: false,
+  installPrompt: null,
+  lastDeviceError: '',
 };
 
 const hoursAgo = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
@@ -89,17 +92,43 @@ function fullDate(value) {
 
 function updateStatus() {
   const pill = $('#connection-pill');
-  if (state.status.mode === 'live') {
+  if (state.status.outlookConnected) {
     pill.classList.add('live');
-    pill.innerHTML = '<span class="pulse-dot"></span><span>Connected</span>';
+    pill.innerHTML = '<span class="pulse-dot"></span><span>Outlook connected</span>';
   } else {
     pill.classList.remove('live');
-    pill.innerHTML = '<span class="pulse-dot"></span><span>Demo workspace</span>';
+    pill.innerHTML = '<span class="pulse-dot"></span><span>' + (state.status.outlookReady ? 'Connect Outlook' : 'Setup needed') + '</span>';
   }
-  $('#gateway-mark').textContent = state.status.gatewayReady ? '✓' : '○';
-  $('#resend-mark').textContent = state.status.resendReady ? '✓' : '○';
-  $('#gateway-mark').classList.toggle('ready', state.status.gatewayReady);
-  $('#resend-mark').classList.toggle('ready', state.status.resendReady);
+  $('#nova-mark').textContent = state.status.novaReady ? '✓' : '○';
+  $('#outlook-mark').textContent = state.status.outlookConnected ? '✓' : '○';
+  $('#nova-mark').classList.toggle('ready', state.status.novaReady);
+  $('#outlook-mark').classList.toggle('ready', state.status.outlookConnected);
+  $('#outlook-account').textContent = state.status.outlookConnected
+    ? (state.status.outlookAccount || 'Mailbox connected · automatic sync on')
+    : 'Inbox, drafts · approved replies';
+  const connectButton = $('#connect-outlook');
+  if (connectButton) {
+    connectButton.disabled = !state.status.outlookReady || state.status.outlookConnected;
+    connectButton.textContent = state.status.outlookConnected ? 'Outlook connected' : 'Connect Outlook';
+  }
+  renderDeviceAuth();
+  $('#sync-button').disabled = !state.status.outlookConnected || state.refreshing;
+  $('#sync-button').classList.toggle('syncing', state.refreshing);
+}
+
+function renderDeviceAuth() {
+  const box = $('#device-code');
+  const device = state.status.deviceAuth;
+  const waiting = device?.status === 'waiting';
+  box.classList.toggle('hidden', !waiting);
+  if (waiting) {
+    state.lastDeviceError = '';
+    $('#device-link').href = device.verificationUri || 'https://microsoft.com/devicelogin';
+    $('#device-user-code').textContent = device.userCode || '';
+  } else if (device?.status === 'error' && device.error && state.lastDeviceError !== device.error) {
+    state.lastDeviceError = device.error;
+    toast(device.error);
+  }
 }
 
 function visibleEmails() {
@@ -119,7 +148,7 @@ function visibleEmails() {
 
 function rowTag(email) {
   if (email.status === 'sent') return '<span class="row-tag green-tag">Replied</span>';
-  if (email.status === 'blocked') return '<span class="row-tag amber-tag">Blocked</span>';
+  if (email.status === 'blocked' || email.status === 'send_failed') return '<span class="row-tag amber-tag">' + (email.status === 'blocked' ? 'Blocked' : 'Check send') + '</span>';
   if (email.category === 'Priority') return '<span class="row-tag">Priority</span>';
   if (email.category === 'Follow up') return '<span class="row-tag amber-tag">Follow up</span>';
   return '';
@@ -161,6 +190,8 @@ function renderList() {
 function statusLabel(email) {
   if (email.status === 'sent') return 'Reply sent';
   if (email.status === 'blocked') return 'Sender blocked';
+  if (email.status === 'sending') return 'Sending reply';
+  if (email.status === 'send_failed') return 'Send needs review';
   if (email.status === 'processing') return 'Drafting reply';
   if (email.status === 'needs_draft') return 'Needs a draft';
   return 'Draft ready';
@@ -183,8 +214,8 @@ function renderDetail() {
   empty.classList.add('hidden');
   content.classList.remove('hidden');
   $('#detail-panel').classList.add('mobile-open');
-  const canSend = state.status.mode === 'live' && state.status.resendReady && email.trusted && email.status !== 'sent' && email.status !== 'blocked';
-  const canDraft = state.status.mode === 'live' && state.status.gatewayReady && email.trusted && email.status !== 'sent';
+  const canSend = state.status.outlookConnected && email.trusted && email.status !== 'sent' && email.status !== 'blocked' && email.status !== 'sending' && email.status !== 'send_failed';
+  const canDraft = state.status.novaReady && email.trusted && email.status !== 'sent' && email.status !== 'send_failed' && email.status !== 'sending';
   const draft = getDraft(email);
   const statusText = email.status === 'blocked' ? 'Not processed' : statusLabel(email);
   const errorMarkup = email.draftError && email.status !== 'sent'
@@ -193,12 +224,12 @@ function renderDetail() {
     ? `<div class="sent-banner"><span>✓</span><strong>Reply sent</strong><span>${escapeHtml(fullDate(email.sentAt))}</span></div>`
     : `<section class="ai-draft-card">
         <div class="draft-heading"><div class="draft-title"><span class="draft-sparkle">✳</span> AI reply draft</div><div class="draft-state">${escapeHtml(statusText)}</div></div>
-        ${email.trusted ? `<textarea class="draft-body" id="draft-body" aria-label="Edit reply draft" placeholder="Your AI reply draft will appear here…">${escapeHtml(draft)}</textarea>` : `<div class="draft-error">This message came from an address outside your sender allowlist. Its content was not sent to the AI.</div>`}
+        ${email.trusted ? `<textarea class="draft-body" id="draft-body" aria-label="Edit reply draft" placeholder="Your AI reply draft will appear here…">${escapeHtml(draft)}</textarea>` : `<div class="draft-error">This message came from an address outside your sender allowlist. Its contents were not shown to NOVA V8.</div>`}
         ${errorMarkup}
         <div class="draft-bottom"><div class="draft-hint"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5v2m0 11v2m7.5-7.5h-2m-11 0h-2m12.8-5.3-1.4 1.4m-7.8 7.8-1.4 1.4m10.6 0-1.4-1.4m-7.8-7.8L5.3 4.7"/><circle cx="10" cy="10" r="3"/></svg> Review and edit before sending</div>
           <div class="draft-buttons">
             <button class="button-secondary" id="regenerate-button" type="button" ${canDraft ? '' : 'disabled'}>${email.draft ? 'Regenerate' : 'Generate draft'}</button>
-            <button class="button-primary" id="send-button" type="button" ${canSend && draft.trim() ? '' : 'disabled'}><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m18 2-6 16-3.5-7.5L1 7Z"/><path d="M18 2 8.5 10.5"/></svg>${canSend ? 'Send reply' : 'Demo mode'}</button>
+            <button class="button-primary" id="send-button" type="button" ${canSend && draft.trim() ? '' : 'disabled'}><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m18 2-6 16-3.5-7.5L1 7Z"/><path d="M18 2 8.5 10.5"/></svg>${email.status === 'send_failed' ? 'Check Sent Items' : (canSend ? 'Send reply' : (state.status.outlookConnected ? 'Send reply' : 'Connect Outlook'))}</button>
           </div>
         </div>
       </section>
@@ -211,7 +242,7 @@ function renderDetail() {
   <div class="detail-subject-row"><h2 class="detail-subject">${escapeHtml(email.subject || '(no subject)')}</h2><div class="detail-labels">${email.category ? `<span class="subject-label">${escapeHtml(email.category)}</span>` : ''}${email.status === 'draft' ? '<span class="subject-label">AI draft</span>' : ''}</div></div>
   <article class="email-card">
     <div class="email-header"><div class="row-avatar ${senderTone(email)}">${escapeHtml(initialsFor(email))}</div><div class="email-sender-copy"><b>${escapeHtml(email.senderName || email.sender)}</b><span>${escapeHtml(email.sender)} · to me</span></div><time class="email-date">${escapeHtml(fullDate(email.receivedAt))}</time></div>
-    <div class="email-body">${escapeHtml(email.body || email.preview || 'No readable message body was included.')}</div>
+    <div class="email-body">${escapeHtml(email.trusted ? (email.body || email.preview || 'No readable message body was included.') : 'This message is outside your trusted sender list. Its contents are hidden and were not sent to NOVA V8.')}</div>
     <div class="email-footer">↳ &nbsp;Reply to <strong>${escapeHtml(email.sender)}</strong></div>
   </article>
   ${draftMarkup}`;
@@ -262,7 +293,7 @@ function toast(message) {
 
 async function regenerateDraft(email) {
   if (email.id.startsWith('demo-')) {
-    toast('Connect Vercel AI Gateway to generate a live draft.');
+    toast('Connect Outlook to draft from your inbox.');
     openSettings();
     return;
   }
@@ -286,7 +317,7 @@ async function regenerateDraft(email) {
 
 async function sendReply(email) {
   if (email.id.startsWith('demo-')) {
-    toast('Connect Resend to send a real reply.');
+    toast('Connect Outlook to send a real reply.');
     openSettings();
     return;
   }
@@ -309,7 +340,7 @@ async function sendReply(email) {
     toast('Reply sent.');
   } catch (error) {
     toast(error.message);
-    if (button) { button.disabled = false; button.textContent = 'Send reply'; }
+    await refreshData(false);
   }
 }
 
@@ -328,23 +359,112 @@ function closeSettings() {
 }
 
 async function loadData() {
+  await refreshData(true);
+}
+
+async function refreshData(syncMailbox = false, quiet = true) {
+  if (state.refreshing) return;
+  const wasConnected = state.status.outlookConnected;
+  state.refreshing = true;
+  updateStatus();
+  let succeeded = false;
   try {
-    const [statusResponse, emailsResponse] = await Promise.all([fetch('/api/status'), fetch('/api/emails')]);
-    if (!statusResponse.ok || !emailsResponse.ok) throw new Error('Server unavailable');
+    const statusResponse = await fetch('/api/status', { cache: 'no-store' });
+    if (!statusResponse.ok) throw new Error('Server unavailable');
     state.status = await statusResponse.json();
+    if ((syncMailbox || (!wasConnected && state.status.outlookConnected)) && state.status.outlookConnected) {
+      const syncResponse = await fetch('/api/sync', { method: 'POST', cache: 'no-store' });
+      if (!syncResponse.ok) {
+        const result = await syncResponse.json().catch(() => ({}));
+        throw new Error(result.error || 'Could not sync Outlook.');
+      }
+    }
+    const emailsResponse = await fetch('/api/emails', { cache: 'no-store' });
+    if (!emailsResponse.ok) throw new Error('Could not load inbox.');
     const result = await emailsResponse.json();
-    state.emails = result.emails.length ? result.emails : demoEmails;
-  } catch {
-    state.status = { mode: 'demo', gatewayReady: false, resendReady: false };
-    state.emails = demoEmails;
+    state.emails = result.emails.length ? result.emails : (state.status.outlookConnected ? [] : demoEmails);
+    succeeded = true;
+  } catch (error) {
+    if (!quiet) toast(error.message || 'Could not refresh Outlook.');
+    if (!state.status.outlookConnected) {
+      state.status = { mode: 'demo', novaReady: false, outlookReady: false, outlookConnected: false, deviceAuth: null };
+      state.emails = demoEmails;
+    }
+  } finally {
+    state.refreshing = false;
   }
   const date = new Date();
   $('.inbox-heading .eyebrow').textContent = date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase();
   updateStatus();
-  renderList();
-  state.selectedId = visibleEmails()[0]?.id || null;
+  const currentSelectionExists = state.emails.some((email) => email.id === state.selectedId);
+  if (!currentSelectionExists) state.selectedId = visibleEmails()[0]?.id || null;
   renderList();
   renderDetail();
+  return succeeded;
+}
+
+async function connectOutlook() {
+  const button = $('#connect-outlook');
+  if (button) { button.disabled = true; button.textContent = 'Starting…'; }
+  try {
+    const response = await fetch('/api/outlook/connect', { method: 'POST' });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Could not start Outlook sign-in.');
+    toast('Use the Microsoft sign-in code shown here.');
+    await refreshData(false);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    if (button) {
+      button.disabled = !state.status.outlookReady || state.status.outlookConnected;
+      button.textContent = state.status.outlookConnected ? 'Outlook connected' : 'Connect Outlook';
+    }
+  }
+}
+
+async function syncNow() {
+  if (!state.status.outlookConnected) {
+    openSettings();
+    toast('Connect Outlook to sync your inbox.');
+    return;
+  }
+  if (await refreshData(true, false)) toast('Outlook inbox is up to date.');
+}
+
+function setupInstallAndUpdates() {
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    state.installPrompt = event;
+    $('#install-button').hidden = false;
+  });
+  window.addEventListener('appinstalled', () => {
+    state.installPrompt = null;
+    $('#install-button').hidden = true;
+    toast('NOVA RESPONSE installed.');
+  });
+  $('#install-button').addEventListener('click', async () => {
+    if (!state.installPrompt) {
+      toast('Use your browser menu to install NOVA RESPONSE.');
+      return;
+    }
+    state.installPrompt.prompt();
+    await state.installPrompt.userChoice;
+    state.installPrompt = null;
+    $('#install-button').hidden = true;
+  });
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').then((registration) => {
+      registration.update().catch(() => {});
+      setInterval(() => registration.update().catch(() => {}), 5 * 60 * 1000);
+    }).catch(() => {});
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return;
+      reloading = true;
+      window.location.reload();
+    });
+  }
 }
 
 $$('.nav-item[data-view], .label-item[data-view]').forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
@@ -376,6 +496,8 @@ $('#empty-setup').addEventListener('click', openSettings);
 $('#settings-close').addEventListener('click', closeSettings);
 $('#overlay').addEventListener('click', closeSettings);
 $('#compose-button').addEventListener('click', () => $('#compose-dialog').showModal());
+$('#connect-outlook').addEventListener('click', connectOutlook);
+$('#sync-button').addEventListener('click', syncNow);
 document.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault(); $('#search-input').focus();
@@ -383,4 +505,14 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeSettings();
 });
 
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshData(true);
+});
+setInterval(() => {
+  if (document.visibilityState === 'visible') refreshData(true);
+}, 60_000);
+setInterval(() => {
+  if (state.status.deviceAuth?.status === 'waiting' || state.status.deviceAuth?.status === 'starting') refreshData(false);
+}, 2_000);
+setupInstallAndUpdates();
 loadData();

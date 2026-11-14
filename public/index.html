@@ -5,7 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f6f7f8" />
     <meta name="description" content="NOVA RESPONSE — thoughtful AI email drafts, always reviewed by you." />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>NOVA RESPONSE</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
     <link rel="stylesheet" href="/styles.css" />
     <script src="/app.js" defer></script>
   </head>
@@ -20,7 +26,7 @@
         <div class="workspace-label">WORKSPACE</div>
         <button class="workspace-switcher" type="button" id="workspace-button">
           <span class="workspace-icon">N</span>
-          <span class="workspace-copy"><b>Northstar Studio</b><small>Personal workspace</small></span>
+          <span class="workspace-copy"><b>NOVA RESPONSE</b><small>Outlook workspace</small></span>
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
         </button>
 
@@ -58,7 +64,7 @@
           </button>
           <div class="profile-row">
             <div class="avatar avatar-profile">N</div>
-            <div class="profile-copy"><b>Nova Admin</b><small>Personal account</small></div>
+            <div class="profile-copy"><b>NOVA RESPONSE</b><small>Personal account</small></div>
             <button type="button" class="more-button" aria-label="Account options">···</button>
           </div>
         </div>
@@ -69,6 +75,10 @@
           <div class="breadcrumbs"><span>Mail</span><span class="crumb-slash">/</span><b id="breadcrumb-view">All mail</b></div>
           <div class="topbar-actions">
             <div class="connection-pill" id="connection-pill"><span class="pulse-dot"></span><span>Loading…</span></div>
+            <button class="sync-button" type="button" id="sync-button" aria-label="Sync Outlook inbox" title="Sync Outlook inbox">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.5 9a7 7 0 0 1 11.8-2L20 12M4 12l2.7 5a7 7 0 0 0 11.8-2"/></svg>
+            </button>
+            <button class="install-button" type="button" id="install-button" hidden>Install app</button>
             <button class="icon-button help-button" type="button" id="help-open" aria-label="Open setup guide">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9a2.5 2.5 0 1 1 4.3 1.7c-1 .9-1.9 1.2-1.9 2.8"/><path d="M12 17.5h.01"/></svg>
             </button>
@@ -126,24 +136,30 @@
         <div><div class="eyebrow">GET CONNECTED</div><h2>Make it yours</h2></div>
         <button class="icon-button" type="button" id="settings-close" aria-label="Close settings"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
-      <p class="drawer-intro">Connect your inbox and AI model. Keys stay on your server in a private <code>.env</code> file.</p>
+      <p class="drawer-intro">Connect an Outlook mailbox and NOVA V8. Your sign-in token stays in the operating system’s encrypted credential store.</p>
       <div class="connection-card">
-        <div class="connection-card-top"><span class="service-icon gateway-icon">✳</span><div><b>Vercel AI Gateway</b><small>Nova 2 Lite · email drafting</small></div><span class="status-mark" id="gateway-mark">○</span></div>
-        <p>Uses the current Vercel Gateway model ID <code>amazon/nova-2-lite</code>. Change it in <code>.env</code> if you prefer another model.</p>
+        <div class="connection-card-top"><span class="service-icon nova-icon">✳</span><div><b>NOVA V8</b><small>nova-v8.vercel.app · reply drafting</small></div><span class="status-mark" id="nova-mark">○</span></div>
+        <p>Drafts are sent to your NOVA V8 endpoint. Add <code>NOVA_V8_API_KEY</code> only if your NOVA V8 setup requires a key.</p>
       </div>
       <div class="connection-card">
-        <div class="connection-card-top"><span class="service-icon resend-icon">R</span><div><b>Resend</b><small>Inbound email · approved replies</small></div><span class="status-mark" id="resend-mark">○</span></div>
-        <p>Resend receives your email and sends replies only after you review the draft.</p>
+        <div class="connection-card-top"><span class="service-icon outlook-icon">O</span><div><b>Microsoft Outlook</b><small id="outlook-account">Inbox, drafts · approved replies</small></div><span class="status-mark" id="outlook-mark">○</span></div>
+        <p>Outlook inbox and drafts refresh automatically while NOVA RESPONSE is running. Email is only sent after you review and click Send.</p>
+        <div class="device-code hidden" id="device-code">
+          <span>Sign in at <a id="device-link" href="https://microsoft.com/devicelogin" target="_blank" rel="noreferrer">microsoft.com/devicelogin</a></span>
+          <strong id="device-user-code"></strong>
+        </div>
+        <button class="button-primary connect-outlook" type="button" id="connect-outlook">Connect Outlook</button>
       </div>
       <div class="setup-steps">
         <div class="setup-title">SETUP CHECKLIST</div>
-        <div class="setup-step"><span class="step-number">1</span><div><b>Add your credentials</b><p>Copy <code>.env.example</code> to <code>.env</code>, then add your Vercel Gateway and Resend keys.</p></div></div>
-        <div class="setup-step"><span class="step-number">2</span><div><b>Allow trusted senders</b><p>Add exact email addresses to <code>ALLOWED_SENDERS</code>. Start with your own address.</p></div></div>
-        <div class="setup-step"><span class="step-number">3</span><div><b>Point Resend to your app</b><p>Register a signed <code>email.received</code> webhook at <code>/webhook</code>.</p></div></div>
+        <div class="setup-step"><span class="step-number">1</span><div><b>Register a Microsoft app</b><p>Use a public client app and add delegated <code>User.Read</code>, <code>Mail.ReadWrite</code>, and <code>Mail.Send</code> permissions.</p></div></div>
+        <div class="setup-step"><span class="step-number">2</span><div><b>Set up NOVA RESPONSE</b><p>Copy <code>.env.example</code> to <code>.env</code>, then add <code>MICROSOFT_CLIENT_ID</code>.</p></div></div>
+        <div class="setup-step"><span class="step-number">3</span><div><b>Allow trusted senders</b><p>Add exact email addresses to <code>ALLOWED_SENDERS</code>. Messages from other addresses stay out of NOVA V8.</p></div></div>
+        <div class="setup-step"><span class="step-number">4</span><div><b>Install the app</b><p>Use <b>Install app</b> in the top bar. Updates install automatically when available.</p></div></div>
       </div>
       <div class="safety-note"><span class="safety-icon">✓</span><p><b>Human approval is always on.</b><br />NOVA RESPONSE never sends an AI draft automatically.</p></div>
-      <a class="drawer-docs" href="https://vercel.com/docs/ai-gateway" target="_blank" rel="noreferrer">Vercel AI Gateway docs <span>↗</span></a>
-      <a class="drawer-docs" href="https://resend.com/docs/dashboard/receiving" target="_blank" rel="noreferrer">Resend receiving docs <span>↗</span></a>
+      <a class="drawer-docs" href="https://learn.microsoft.com/en-us/entra/identity-platform/scenario-desktop-acquire-token-device-code-flow" target="_blank" rel="noreferrer">Microsoft sign-in setup <span>↗</span></a>
+      <a class="drawer-docs" href="https://nova-v8.vercel.app/" target="_blank" rel="noreferrer">NOVA V8 <span>↗</span></a>
     </aside>
 
     <dialog class="compose-dialog" id="compose-dialog">
@@ -151,7 +167,7 @@
         <div class="compose-dialog-header"><h2>New message</h2><button class="icon-button" type="submit" aria-label="Close"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
         <label class="compose-field">To <input id="compose-to" type="email" placeholder="name@example.com" /></label>
         <label class="compose-field">Subject <input id="compose-subject" placeholder="Subject" /></label>
-        <p class="compose-hint">New messages are not connected yet. Replies to received emails are ready to review and send.</p>
+        <p class="compose-hint">NOVA RESPONSE is focused on drafting and sending reviewed replies to messages in your Outlook inbox.</p>
         <div class="compose-dialog-footer"><span>✳ AI assist is ready for replies</span><button class="button-secondary" type="submit">Close</button></div>
       </form>
     </dialog>

@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "NOVA RESPONSE",
+  "short_name": "NOVA",
+  "description": "Human-reviewed AI email replies powered by NOVA V8.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f8",
+  "theme_color": "#f6f7f8",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

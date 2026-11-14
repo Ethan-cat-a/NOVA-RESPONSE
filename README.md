@@ -1,68 +1,70 @@
 # NOVA RESPONSE
 
-NOVA RESPONSE is a small, self-hosted inbox for AI-assisted email replies. It receives messages through Resend, drafts a response with Vercel AI Gateway, and waits for a person to review and send it.
+NOVA RESPONSE is an installable, self-hosted Outlook inbox app. It uses **NOVA V8** at https://nova-v8.vercel.app/api/chat to draft replies. The app imports Outlook inbox messages, automatically drafts replies for exact allowlisted senders, and leaves every send action for you to approve.
 
-## What it does
+## Features
 
-- Shows an inbox, message details, and editable reply drafts.
-- Accepts inbound messages through a signed Resend `email.received` webhook.
-- Checks exact sender addresses against `ALLOWED_SENDERS` before calling the AI model.
-- Treats incoming email as untrusted content and gives the model no tools or access to secrets.
-- Sends only after a person clicks **Send reply**.
-- Includes a sample inbox when credentials are not configured.
+- Outlook inbox and Microsoft Graph sign-in using device code.
+- Automatic inbox and draft sync every 60 seconds while the app server is running.
+- NOVA V8 reply drafts for senders in your exact ALLOWED_SENDERS list.
+- Replies remain editable and are sent only after you click **Send reply**.
+- Installable PWA with automatic shell updates when a new app version is published.
+- API responses and mail are never cached by the service worker.
+- Demo inbox when no Outlook account is connected.
 
 ## Run locally
 
 Requires Node.js 22 or later.
 
-```sh
-npm install
-cp .env.example .env
-npm run dev
-```
+    npm install
+    cp .env.example .env
+    npm start
 
-Open [http://localhost:3000](http://localhost:3000). The app starts in demo mode until credentials are configured.
+Open http://localhost:3000, open **Settings**, and connect Outlook. You can install the app from the browser’s **Install app** button when the browser supports PWA installation. Localhost is treated as a secure origin for app installation.
 
-### Configure Vercel AI Gateway
+## Connect NOVA V8
 
-Create an AI Gateway key in Vercel and place it in `.env` as `AI_GATEWAY_API_KEY`. The default model is `amazon/nova-2-lite`, a current, cost-effective Nova model for everyday text drafting. The live Vercel catalog currently lists Nova 2 Lite, Nova Lite, Nova Micro, and Nova Pro; it has no model with the exact name “Nova v8.” `AI_GATEWAY_MODEL` can be changed to any exact `creator/model` ID returned by the [Gateway model list](https://vercel.com/ai-gateway/models).
+The default endpoint is https://nova-v8.vercel.app/api/chat and the default mode is fast. Set NOVA_V8_API_KEY only if your NOVA V8 deployment requires a key. The key stays in the local .env file and is sent only from the server to NOVA V8.
 
-The app reads `VERCEL_OIDC_TOKEN` as an authentication fallback when the runtime provides it.
+## Connect Outlook
 
-### Configure inbound email with Resend
+1. In the [Microsoft Entra admin center](https://entra.microsoft.com/), register a public client application that supports the account types you use.
+2. Enable public client flows for the registration.
+3. Add these **delegated** Microsoft Graph permissions: User.Read, Mail.ReadWrite, and Mail.Send.
+4. Copy the application (client) ID into MICROSOFT_CLIENT_ID in .env.
+5. Set exact addresses in ALLOWED_SENDERS, then restart the server.
+6. In NOVA RESPONSE Settings, click **Connect Outlook** and enter the Microsoft device code.
 
-1. Enable receiving for a Resend-provided address or a domain/subdomain.
-2. Set `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, and `REPLY_FROM` in `.env`.
-3. Add your exact sender addresses to `ALLOWED_SENDERS`, comma-separated.
-4. Register a public POST webhook at `/webhook` for the `email.received` event. For local development, expose the app through a stable HTTPS tunnel.
-5. Send a message from an allowed address. NOVA RESPONSE creates a draft for review.
-
-`REPLY_FROM` must be a verified sending identity in Resend. Do not expose the dashboard publicly without adding your own authentication and HTTPS protection. The webhook itself verifies Resend signatures against the raw request body.
+MSAL stores its token cache using the operating system’s protected credential service: Keychain on macOS, DPAPI on Windows, and Secret Service/LibSecret on Linux. Linux must have a Secret Service provider available; the app does not fall back to a plaintext token cache.
 
 ## Environment variables
 
 | Variable | Purpose |
 | --- | --- |
-| `AI_GATEWAY_API_KEY` | Local/server AI Gateway authentication |
-| `VERCEL_OIDC_TOKEN` | Optional Vercel deployment authentication fallback |
-| `AI_GATEWAY_MODEL` | Exact model ID; defaults to `amazon/nova-2-lite` |
-| `AI_GATEWAY_BASE_URL` | Gateway URL; defaults to `https://ai-gateway.vercel.sh/v1` |
-| `RESEND_API_KEY` | Read inbound email and send replies through Resend |
-| `RESEND_WEBHOOK_SECRET` | Verify inbound webhook signatures |
-| `REPLY_FROM` | Verified sender identity used for approved replies |
-| `ALLOWED_SENDERS` | Comma-separated exact sender addresses allowed for AI processing |
-| `BUSINESS_CONTEXT` | Brief factual context for draft generation |
-| `REPLY_TONE` | Draft tone guidance |
-| `DASHBOARD_PASSWORD` | Optional password for the local dashboard API |
-| `HOST` / `PORT` | Server bind address and port; defaults to `127.0.0.1:3000` |
+| NOVA_V8_API_URL | NOVA V8 API endpoint; defaults to https://nova-v8.vercel.app/api/chat |
+| NOVA_V8_API_KEY | Optional server-side credential, if the NOVA V8 endpoint requires it |
+| NOVA_V8_MODE | NOVA V8 generation mode; defaults to fast |
+| MICROSOFT_CLIENT_ID | Microsoft Entra public client application ID |
+| MICROSOFT_AUTHORITY | Entra authority; defaults to common for personal and work/school accounts |
+| ALLOWED_SENDERS | Exact comma-separated addresses whose email content may be sent to NOVA V8 |
+| REPLY_TONE | Tone guidance for generated replies |
+| BUSINESS_CONTEXT | Factual context for generated replies |
+| DASHBOARD_PASSWORD | Optional local dashboard password; required for non-loopback HOST |
+| HOST / PORT | Bind address and port; default is 127.0.0.1:3000 |
 
-## Security notes
+## Automatic updates
 
-- Keep `.env` private. It is ignored by Git.
-- Start with a narrow sender allowlist. Messages from other senders are logged and not sent to the model.
-- The model receives only the message metadata and body needed to write a reply. No tools are enabled.
-- AI output is always a draft. Sending is a separate, explicit action in the dashboard.
-- Local JSON data is stored under `data/` and is ignored by Git.
+While the NOVA RESPONSE server is running, it syncs Outlook every minute. The installed PWA checks for a new app shell every five minutes while open. When a new version is published, the service worker installs it and reloads the app automatically. A stopped local server cannot sync mail or retrieve app updates.
+
+For public or shared hosting, use HTTPS and set a strong DASHBOARD_PASSWORD. Do not deploy this local JSON store to an ephemeral serverless filesystem: Outlook sign-in cache and inbox data need persistent storage. The repository does not include deployment credentials or mailbox tokens.
+
+## Safety and privacy
+
+- Only exact addresses in ALLOWED_SENDERS have their message bodies retrieved for NOVA V8.
+- Untrusted email content is framed as data. The model has no tools and is told to ignore instructions embedded in messages.
+- AI output is never sent automatically. The app uses Microsoft Graph to create and send a reply only after a user action.
+- Messages and local state are stored in data/emails.json, which is ignored by Git.
+- Keep .env private. It is ignored by Git.
 
 ## License
 
